@@ -1,0 +1,23 @@
+{
+  "nodes": {
+    "root": {
+      "inputs": {
+        "teamcity": "teamcity"
+      }
+    },
+    "teamcity": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-UHKTxgeLhYQvqeIoM+eTKEh2BZu8Fe1PvxHV0V+QR2g=",
+        "type": "tarball",
+        "url": "https://download.jetbrains.com/teamcity/TeamCity-2022.04.4.tar.gz"
+      },
+      "original": {
+        "type": "tarball",
+        "url": "https://download.jetbrains.com/teamcity/TeamCity-2022.04.4.tar.gz"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
