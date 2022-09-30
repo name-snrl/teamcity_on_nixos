@@ -1,11 +1,26 @@
 {
-  description = "A very basic flake";
+  description = "TeamCity";
 
-  outputs = { self, nixpkgs }: {
-
-    packages.x86_64-linux.hello = nixpkgs.legacyPackages.x86_64-linux.hello;
-
-    defaultPackage.x86_64-linux = self.packages.x86_64-linux.hello;
-
+  inputs = {
+    teamcity = {
+      url = "https://download.jetbrains.com/teamcity/TeamCity-2022.04.4.tar.gz";
+      flake = false;
+    };
   };
+
+  outputs = inputs@{ self, teamcity, ... }:
+    {
+      nixosModules = {
+        teamcity-agent = import ./agent.nix {
+          pname = "teamcity-agent";
+          version = "22.04.4";
+          src = teamcity;
+        };
+        teamcity-server = import ./server.nix {
+          pname = "teamcity-server";
+          version = "22.04.4";
+          src = teamcity;
+        };
+      };
+    };
 }
