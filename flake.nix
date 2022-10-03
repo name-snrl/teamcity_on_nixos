@@ -21,6 +21,16 @@
           version = "22.04.4";
           src = teamcity;
         };
+        teamcity-agent-as-pkg = import ./agent_as_pkg.nix {
+          pname = "teamcity-agent";
+          version = "22.04.4";
+          src = teamcity;
+        };
+        teamcity-server-as-pkg = import ./server_as_pkg.nix {
+          pname = "teamcity-server";
+          version = "22.04.4";
+          src = teamcity;
+        };
       };
     };
 }
