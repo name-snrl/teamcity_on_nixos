@@ -8,34 +8,53 @@ let
     "logs"
     "work"
     "system"
+    "tools"
     "backup"
     "update"
-    "tools"
-  ];
+    "launcher/logs"
+  ] ++ existedStateDirs;
 
-  dataDir = "/var/teamcity/server";
+  existedStateDirs = [ "plugins" ];
+
+  additionalOutputs = map (builtins.replaceStrings ["/"] [""]) existedStateDirs;
 
   pkg = pkgs.stdenv.mkDerivation (input // {
+    outputs = [ "out" ] ++ additionalOutputs;
+
     installPhase = ''
+      ex=(${builtins.concatStringsSep " " existedStateDirs})
+
+      for i in ''${ex[@]}; do
+        dest=''${i/\//}
+        mv buildAgent/$i ''${!dest}
+      done
+
       cp -R buildAgent $out
 
       state=(${builtins.concatStringsSep " " stateDirs})
 
-      for i in "''${state[@]}"; do
+      for i in ''${state[@]}; do
+        rm -rf $out/$i &> /dev/null
         ln -sf ${dataDir}/$i/ $out/
       done
     '';
   });
 
-  installer = pkgs.writeShellScriptBin "install-tc-agent" ''
+  dataDir = "/var/teamcity/agent";
+
+  installer = pkgs.writeShellScriptBin "tc-agent" ''
     rm -rf ${dataDir}
-    echo --- BEFORE ---
-    ${pkgs.exa}/bin/exa -la ${pkg}
     mkdir -p ${dataDir}/{${builtins.concatStringsSep "," stateDirs}}
-    cp -rsf ${pkg}/* ${dataDir}/ &> /dev/null
-    cp --remove-destination ${pkg}/bin/*.sh ${dataDir}/bin/
-    echo --- AFTER ---
-    ${pkgs.exa}/bin/exa -la ${pkg}
+
+    cp -rsfP ${pkg}/* ${dataDir}/
+
+    ex=(${lib.concatMapStringsSep " " (p: p + "=${pkg.${p}}") additionalOutputs})
+
+    for i in ''${ex[@]}; do
+      dest=''${i%=*}
+      source=''${i#*=}
+      cp -rsfP $source/* ${dataDir}/$dest/
+    done
   '';
 in
 
