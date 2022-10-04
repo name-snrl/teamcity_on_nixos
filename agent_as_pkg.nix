@@ -14,7 +14,7 @@ let
     "launcher/logs"
   ] ++ existedStateDirs;
 
-  existedStateDirs = [ "plugins" ];
+  existedStateDirs = [ "plugins" "conf" ];
 
   additionalOutputs = map (builtins.replaceStrings ["/"] [""]) existedStateDirs;
 

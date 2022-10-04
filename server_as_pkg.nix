@@ -5,7 +5,7 @@ with lib;
 let
   stateDirs = [ "temp" "logs" "work" ] ++ existedStateDirs;
 
-  existedStateDirs = [ "webapps" ];
+  existedStateDirs = [ "webapps" "conf" ];
 
   additionalOutputs = map (builtins.replaceStrings ["/"] [""]) existedStateDirs;
 
