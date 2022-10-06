@@ -6,8 +6,6 @@ let
   name = "teamcity-agent";
   cfg = config.services.teamcity.agent;
 
-  homeDir = "/var/lib/${cfg.stateDir}";
-
   pkg = pkgs.stdenv.mkDerivation (input // {
     installPhase = "cp -R buildAgent $out";
   });
@@ -30,11 +28,11 @@ in
       description = "Group account under which ${name} runs.";
     };
 
-    stateDir = mkOption {
+    homeDir = mkOption {
       type = str;
       default = "${name}";
+      apply = (o: "/var/lib/" + o);
       description = "Directory to be created by systemd in /var/lib.";
-
     };
 
     cleanUp = mkOption {
@@ -42,8 +40,8 @@ in
       default = false;
       example = [ "work" "logs" ];
       description = ''
-        If true, all data in ${homeDir} will be deleted. Also you cat remove
-        certain directories in ${homeDir}.
+        If true, all data in ${cfg.homeDir} will be deleted. Also you can remove
+        certain directories in ${cfg.homeDir}.
       '';
     };
 
@@ -71,7 +69,8 @@ in
       description = "Which JDK to use.";
     };
 
-    plugins = mkOption { # check it
+    plugins = mkOption {
+      # check it
       type = listOf (either path package);
       default = [ ];
       description = "List containing path or package to be added to the plugins directory.";
@@ -96,17 +95,17 @@ in
 
       preStart = ''
         ${optionalString (cfg.cleanUp != false)
-        (if (cfg.cleanUp == true) then "rm -rf ${homeDir}/*"
+        (if (cfg.cleanUp == true) then "rm -rf ${cfg.homeDir}/*"
         else ''
-          rm -rf ${homeDir}/{${builtins.concatStringsSep "," cfg.cleanUp}}
+          rm -rf ${cfg.homeDir}/{${builtins.concatStringsSep "," cfg.cleanUp}}
         '')}
 
-        cp -rf --no-preserve=mode ${pkg}/* ${homeDir}
-        chmod +x ${homeDir}/bin/*.sh
+        cp -rf --no-preserve=mode ${pkg}/* ${cfg.homeDir}
+        chmod +x ${cfg.homeDir}/bin/*.sh
 
         ${optionalString (builtins.isAttrs cfg.configuration) ''
           echo -e "\n${generators.toKeyValue { } cfg.configuration}"\
-            >> ${homeDir}/conf/buildAgent.properties
+            >> ${cfg.homeDir}/conf/buildAgent.properties
         ''}
 
         ${optionalString (cfg.plugins != []) ''
@@ -116,8 +115,8 @@ in
           for i in ''${plugins[@]}; do
             src=''${i#*=}
             dest=''${i%=*}
-            mkdir -p ${homeDir}/plugins/$dest
-            cp -rsf --no-preserve=mode $src/* ${homeDir}/plugins/$dest
+            mkdir -p ${cfg.homeDir}/plugins/$dest
+            cp -rsf --no-preserve=mode $src/* ${cfg.homeDir}/plugins/$dest
           done
         ''}
       '';
@@ -134,10 +133,10 @@ in
 
         Type = "oneshot";
 
-        StateDirectory = "${cfg.stateDir}";
+        StateDirectory = removePrefix "/var/lib/" cfg.homeDir;
 
-        ExecStart = "${homeDir}/bin/agent.sh start";
-        ExecStop = "${homeDir}/bin/agent.sh stop";
+        ExecStart = "${cfg.homeDir}/bin/agent.sh start";
+        ExecStop = "${cfg.homeDir}/bin/agent.sh stop";
 
         RemainAfterExit = true;
         SuccessExitStatus = "0 143";
