@@ -44,12 +44,13 @@ let
 
   preStart = ''
     set +e
+    shopt -s extglob
 
     ### Stage 0. Clean-up
     ${optionalString (cfg.cleanUp != false)
     (if (cfg.cleanUp == true) then "rm -rf ${cfg.homeDir}/*"
     else ''
-      rm -rf ${cfg.homeDir}/{${builtins.concatStringsSep "," cfg.cleanUp}}
+      rm -rf ${cfg.homeDir}/!(${builtins.concatStringsSep "|" cfg.cleanUp})
     '')}
 
     ### Stage 1. Install
@@ -72,20 +73,6 @@ let
       ${cfg.homeDir}/webapps/ROOT/update/buildAgent.zip
 
   '';
-    #${optionalString cfg.serverXml ''
-    #  sed -E -i 's#<Server #& allowLinking="true" #' \
-    #    ${cfg.homeDir}/conf/server.xml
-
-    #    sed -e 's,port="8090",port="${toString cfg.listenPort}" address="${cfg.listenAddress}",' \
-    #    '' + (lib.optionalString cfg.proxy.enable ''
-    #      -e 's,protocol="org.apache.coyote.http11.Http11NioProtocol",protocol="org.apache.coyote.http11.Http11NioProtocol" proxyName="${cfg.proxy.name}" proxyPort="${toString cfg.proxy.port}" scheme="${cfg.proxy.scheme}",' \
-    #    '') + ''
-    #      ${pkg}/conf/server.xml.dist > ${cfg.homeDir}/conf/server.xml
-    #'' }
-    #${optionalString (builtins.isAttrs cfg.configuration) ''
-    #  echo -e "\n${generators.toKeyValue { } cfg.configuration}"\
-    #    >> ${cfg.dataDir}/config/teamcity-startup.properties
-    #''}
 
 in
 
@@ -142,8 +129,7 @@ in
       default = false;
       example = [ "work" "logs" ];
       description = ''
-        If true, all data in ${cfg.homeDir} will be deleted. Also you can remove
-        certain directories in ${cfg.homeDir}.
+        If true, all data in ${cfg.homeDir} will be deleted. If list - delete all directories except for directories in list.
       '';
     };
 

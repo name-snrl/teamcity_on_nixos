@@ -40,8 +40,7 @@ in
       default = false;
       example = [ "work" "logs" ];
       description = ''
-        If true, all data in ${cfg.homeDir} will be deleted. Also you can remove
-        certain directories in ${cfg.homeDir}.
+        If true, all data in ${cfg.homeDir} will be deleted. If list - delete all directories except for directories in list.
       '';
     };
 
@@ -94,10 +93,12 @@ in
       after = [ "network.target" ];
 
       preStart = ''
+        shopt -s extglob
+
         ${optionalString (cfg.cleanUp != false)
         (if (cfg.cleanUp == true) then "rm -rf ${cfg.homeDir}/*"
         else ''
-          rm -rf ${cfg.homeDir}/{${builtins.concatStringsSep "," cfg.cleanUp}}
+          rm -rf ${cfg.homeDir}/!(${builtins.concatStringsSep "|" cfg.cleanUp})
         '')}
 
         cp -rf --no-preserve=mode ${pkg}/* ${cfg.homeDir}
