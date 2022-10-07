@@ -134,6 +134,7 @@ in
         Type = "oneshot";
 
         StateDirectory = removePrefix "/var/lib/" cfg.homeDir;
+        StateDirectoryMode = "0700";
 
         ExecStart = "${cfg.homeDir}/bin/agent.sh start";
         ExecStop = "${cfg.homeDir}/bin/agent.sh stop";

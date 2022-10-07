@@ -44,10 +44,16 @@ let
 
   preStart = ''
     set +e
-    rm -rf ${cfg.homeDir}/*
-    mkdir -p ${cfg.homeDir}/{${builtins.concatStringsSep "," stateDirs}}
 
-    #sed <Resources cachingAllowed="true" cacheMaxSize="20480" allowLinking="true" />
+    ### Stage 0. Clean-up
+    ${optionalString (cfg.cleanUp != false)
+    (if (cfg.cleanUp == true) then "rm -rf ${cfg.homeDir}/*"
+    else ''
+      rm -rf ${cfg.homeDir}/{${builtins.concatStringsSep "," cfg.cleanUp}}
+    '')}
+
+    ### Stage 1. Install
+    mkdir -p ${cfg.homeDir}/{${builtins.concatStringsSep "," stateDirs}}
 
     cp -rsf --no-preserve=mode ${pkg}/* ${cfg.homeDir}/ &> /dev/null
 
@@ -59,48 +65,101 @@ let
       cp -rsf --no-preserve=mode $source/* ${cfg.homeDir}/$dest/ &> /dev/null
     done
 
-    # override with regular file
+    ### Stage 2. Override
+
     rm -rf ${cfg.homeDir}/webapps/ROOT/update/buildAgent.zip
     cp -rf ${pkg.webapps}/ROOT/update/buildAgent.zip \
       ${cfg.homeDir}/webapps/ROOT/update/buildAgent.zip
 
-
-    # tests
-    touch ${cfg.dataDir}/test
   '';
+    #${optionalString cfg.serverXml ''
+    #  sed -E -i 's#<Server #& allowLinking="true" #' \
+    #    ${cfg.homeDir}/conf/server.xml
+
+    #    sed -e 's,port="8090",port="${toString cfg.listenPort}" address="${cfg.listenAddress}",' \
+    #    '' + (lib.optionalString cfg.proxy.enable ''
+    #      -e 's,protocol="org.apache.coyote.http11.Http11NioProtocol",protocol="org.apache.coyote.http11.Http11NioProtocol" proxyName="${cfg.proxy.name}" proxyPort="${toString cfg.proxy.port}" scheme="${cfg.proxy.scheme}",' \
+    #    '') + ''
+    #      ${pkg}/conf/server.xml.dist > ${cfg.homeDir}/conf/server.xml
+    #'' }
+    #${optionalString (builtins.isAttrs cfg.configuration) ''
+    #  echo -e "\n${generators.toKeyValue { } cfg.configuration}"\
+    #    >> ${cfg.dataDir}/config/teamcity-startup.properties
+    #''}
+
 in
 
 {
   options.services.teamcity = with types; {
 
-    enable = mkEnableOption name;
+    enable = mkEnableOption name; # rdy
 
-    user = mkOption {
+    user = mkOption { # rdy
       type = str;
       default = name;
       description = "User account under which ${name} runs.";
     };
 
-    group = mkOption {
+    group = mkOption { # rdy
       type = str;
       default = name;
-      description = "Group account under which ${name} runs.";
+      description = "Group account under which ${name} runs. Add user to this group to get access to Data Directory.";
     };
 
-    homeDir = mkOption {
+    homeDir = mkOption { # rdy
       type = str;
       default = "${name}";
       apply = (o: "/var/lib/" + o);
-      description = "Directory to be created by systemd in /var/lib.";
+      description = "Agent's Home Directory will be created by systemd in /var/lib.";
     };
 
-    dataDir = mkOption {
+    #homeConfigs = mkOption {
+    #  default = {
+    #  append = {};
+    #  override = {};
+    #  };
+    #  type = types.listOf types.path;
+    #  description = lib.mdDoc "Extra configuration files to pull into the tomcat conf directory";
+    #};
+
+    dataDir = mkOption { # rdy
       type = str;
       default = "/${name}";
-      description = "Full path to data teamcity directory that contain";
+      description = "Path to TeamCity Data Directory.";
     };
 
-    environment = mkOption {
+    #dataConfigs = mkOption {
+    #  default = {
+    #  append = {};
+    #  override = {};
+    #  };
+    #  type = types.listOf types.path;
+    #  description = lib.mdDoc "Extra configuration files to pull into the tomcat conf directory";
+    #};
+
+    cleanUp = mkOption {
+      type = either bool (listOf str);
+      default = false;
+      example = [ "work" "logs" ];
+      description = ''
+        If true, all data in ${cfg.homeDir} will be deleted. Also you can remove
+        certain directories in ${cfg.homeDir}.
+      '';
+    };
+
+    listenAddress = mkOption {
+      type = str;
+      default = "localhost";
+      description = "Address the server will listen on.";
+    };
+
+    port = mkOption {
+      type = port;
+      default = 8111;
+      description = "Port the server will listen on.";
+    };
+
+    environment = mkOption { # rdy
       type = attrsOf str;
       default = { };
       example = {
@@ -112,43 +171,11 @@ in
       description = "Defines environment variables.";
     };
 
-    jdk = mkOption {
+    jdk = mkOption { # rdy
       type = package;
       default = pkgs.jdk11_headless;
       description = "Which JDK to use.";
     };
-
-
-    nginx.enable = mkEnableOption "proxy";
-
-
-
-    ### mb we need this
-
-    extraConfigFiles = mkOption {
-      default = [];
-      type = types.listOf types.path;
-      description = lib.mdDoc "Extra configuration files to pull into the tomcat conf directory";
-    };
-
-    extraGroups = mkOption {
-      default = [];
-      type = types.listOf types.str;
-      example = [ "users" ];
-      description = lib.mdDoc "Defines extra groups to which the tomcat user belongs.";
-    };
-
-    serverXml = mkOption {
-      type = types.lines;
-      default = "";
-      description = lib.mdDoc ''
-        Verbatim server.xml configuration.
-        This is mutually exclusive with the virtualHosts options.
-      '';
-    };
-
-
-
 
     # HOW TO
 
@@ -169,115 +196,115 @@ in
     #  '';
     #};
 
-    #virtualHost = mkOption {
-    #  type = types.submodule (import ../web-servers/apache-httpd/vhost-options.nix);
-    #  example = literalExpression ''
-    #    { hostName = "example.org";
-    #      adminAddr = "webmaster@example.org";
-    #      enableSSL = true;
-    #      sslServerCert = "/var/lib/acme/example.org/full.pem";
-    #      sslServerKey = "/var/lib/acme/example.org/key.pem";
-    #    }
-    #  '';
-    #};
-
-    #services.httpd = {
-    #  enable = true;
-    #  adminAddr = mkDefault cfg.virtualHost.adminAddr;
-    #  extraModules = [ "proxy_fcgi" ];
-
-    #  # look here            !!!!
-    #  virtualHosts.${cfg.virtualHost.hostName} = mkMerge [
-    #    cfg.virtualHost
-    #    {
-
-    #      documentRoot = mkForce "${cfg.package}/share/moodle";
-    #      extraConfig = ''
-    #        <Directory "${cfg.package}/share/moodle">
-    #          <FilesMatch "\.php$">
-    #            <If "-f %{REQUEST_FILENAME}">
-    #              SetHandler "proxy:unix:${fpm.socket}|fcgi://localhost/"
-    #            </If>
-    #          </FilesMatch>
-    #          Options -Indexes
-    #          DirectoryIndex index.php
-    #        </Directory>
-    #      '';
-    #    }
-    #  ];
-    #};
+    nginx.enable = mkEnableOption "proxy";
+    nginx.ssl.enable = mkEnableOption "ssl";
 
   };
 
-  config = mkIf cfg.enable {
+  ### implementation
 
-    services.nginx = {
-      enable = true;
-      clientMaxBodySize = "0";
-      virtualHosts."vm.local" = { # opt
-        extraConfig = ''
-          proxy_read_timeout     1200;
-          proxy_connect_timeout  240;
-        '';
-        locations."/" = {
-          proxyPass = "http://localhost:8111"; # opt
-          proxyWebsockets = true;
-          extraConfig = ''
-            proxy_set_header    Host $server_name:$server_port;
-            proxy_set_header    X-Forwarded-Host $http_host;
-            proxy_set_header    X-Forwarded-Proto $scheme;
-            proxy_set_header    X-Forwarded-For $remote_addr;
-          '';
+  config =
+    let
+      nginx = mkIf cfg.nginx.enable {
+
+        # WIP
+        services.nginx = {
+          enable = true;
+          clientMaxBodySize = "0";
+          virtualHosts."vm.local" = { # opt
+            extraConfig = ''
+              proxy_read_timeout     1200;
+              proxy_connect_timeout  240;
+            '';
+            locations."/" = {
+              proxyPass = "http://localhost:8111"; # opt
+              proxyWebsockets = true;
+              extraConfig = ''
+                proxy_set_header    Host $server_name:$server_port;
+                proxy_set_header    X-Forwarded-Host $http_host;
+                proxy_set_header    X-Forwarded-Proto $scheme;
+                proxy_set_header    X-Forwarded-For $remote_addr;
+              '';
+            };
+          };
         };
-        #addSSL = mkIf cfg.nginx.ssl.enable true;
-        #enableACME = mkIf cfg.nginx.ssl.enable true;
+
       };
-    };
-    #security.acme = mkIf cfg.nginx.ssl.enable {
-    #  acceptTerms = true;
-    #  default.email = "mail@mail.org"; # opt
-    #};
 
-    users.users.${cfg.user} = {
-      description = "${name} owner.";
-      group = cfg.group;
-      isSystemUser = true;
-      createHome = true;
-      home = cfg.dataDir;
-    };
+      ssl = mkIf (cfg.nginx.ssl.enable && cfg.nginx.enable) {
 
-    users.groups.${cfg.group} = { };
+        # WIP
+        services.nginx.virtualHosts."vm.local" = { # opt
+          addSSL = true;
+          enableACME = true;
+        };
+        security.acme = {
+          acceptTerms = true;
+          defaults.email = "mail@mail.org"; # opt
+        };
 
-    systemd.services.${name} = {
-      description = name;
-      wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
-
-      preStart = preStart;
-
-      environment = {
-        JAVA_HOME = "${cfg.jdk}";
-        TEAMCITY_DATA_PATH = "${cfg.dataDir}";
-        TEAMCITY_PID_FILE_PATH = "/run/${name}/${name}.pid";
-        CATALINA_PID = "/run/${name}/${name}.pid";
-      } // cfg.environment;
-
-      path = with pkgs; [ bash gawk ps ];
-
-      serviceConfig = {
-        User = cfg.user;
-        Group = cfg.group;
-
-        Type = "forking";
-        PIDFile="/run/${name}/${name}.pid";
-
-        RuntimeDirectory = name;
-        StateDirectory = removePrefix "/var/lib/" cfg.homeDir;
-
-        ExecStart = "${pkg}/bin/teamcity-server.sh start";
-        ExecStop = "${pkg}/bin/teamcity-server.sh stop";
       };
-    };
 
-  };
+      # rdy
+      main = {
+
+        environment.systemPackages = [
+          (pkgs.writeShellScriptBin "teamcity-maintainDB" ''
+            export JAVA_HOME="${cfg.jdk}";
+            export TEAMCITY_DATA_PATH="${cfg.dataDir}";
+            exec ${cfg.homeDir}/bin/maintainDB.sh $*
+          '')
+        ];
+
+        users.users.${cfg.user} = {
+          description = "${name} owner.";
+          group = cfg.group;
+          isSystemUser = true;
+          createHome = true;
+          home = cfg.dataDir;
+          homeMode = "750";
+        };
+
+        users.groups.${cfg.group} = { };
+
+        systemd.services.${name} = {
+          description = name;
+          wantedBy = [ "multi-user.target" ];
+          after = [ "network.target" ];
+
+          preStart = preStart;
+
+          environment = {
+            JAVA_HOME = "${cfg.jdk}";
+            TEAMCITY_DATA_PATH = "${cfg.dataDir}";
+            TEAMCITY_PID_FILE_PATH = "/run/${name}/${name}.pid";
+            CATALINA_PID = "/run/${name}/${name}.pid";
+          } // cfg.environment;
+
+          path = with pkgs; [ bash gawk ps ];
+
+          serviceConfig = {
+            User = cfg.user;
+            Group = cfg.group;
+
+            Type = "forking";
+            PIDFile = "/run/${name}/${name}.pid";
+
+            RuntimeDirectory = name;
+            StateDirectory = removePrefix "/var/lib/" cfg.homeDir;
+            StateDirectoryMode = "0700";
+
+            ExecStart = "${pkg}/bin/teamcity-server.sh start";
+            ExecStop = "${pkg}/bin/teamcity-server.sh stop";
+          };
+        };
+
+      };
+
+    in
+    mkIf cfg.enable (mkMerge [
+      main
+      nginx
+      ssl
+    ]);
 }
