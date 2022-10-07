@@ -1,4 +1,4 @@
-input: { config, lib, pkgs, ... }:
+input: { config, lib, pkgs, modulesPath, ... }:
 
 with lib;
 
@@ -48,8 +48,8 @@ let
 
     ### Stage 0. Clean-up
     ${optionalString (cfg.cleanUp != false)
-    (if (cfg.cleanUp == true) then "rm -rf ${cfg.homeDir}/*"
-    else ''
+        (if (cfg.cleanUp == true) then "rm -rf ${cfg.homeDir}/*"
+        else ''
       rm -rf ${cfg.homeDir}/!(${builtins.concatStringsSep "|" cfg.cleanUp})
     '')}
 
@@ -67,10 +67,42 @@ let
     done
 
     ### Stage 2. Override
-
     rm -rf ${cfg.homeDir}/webapps/ROOT/update/buildAgent.zip
     cp -rf ${pkg.webapps}/ROOT/update/buildAgent.zip \
       ${cfg.homeDir}/webapps/ROOT/update/buildAgent.zip
+
+    # server.xml
+    rm -f ${cfg.homeDir}/conf/server.xml
+    cp -f --no-preserve=mode ${pkg}/conf/server.xml ${cfg.homeDir}/conf/server.xml
+    ${if cfg.reverseProxy.enable then (if cfg.reverseProxy.enableACME
+        then ''
+      ${pkgs.yq-go}/bin/yq -p xml -o xml 'del(.Server.Service.Connector) |= {
+      "+port": "8111",
+      "+protocol": "org.apache.coyote.http11.Http11NioProtocol",
+      "+connectionTimeout": "60000", 
+      "+useBodyEncodingForURI": true, 
+      "+socket.txBufSize": "64000", 
+      "+socket.rxBufSize": "64000", 
+      "+tcpNoDelay": "1", 
+      "+secure": true, 
+      "+scheme": "https"}' ${pkg}/conf/server.xml > ${cfg.homeDir}/conf/server.xml
+    '' else ''
+      ${pkgs.yq-go}/bin/yq -p xml -o xml 'del(.Server.Service.Connector) |= {
+      "+port": "8111",
+      "+protocol": "org.apache.coyote.http11.Http11NioProtocol",
+      "+connectionTimeout": "60000", 
+      "+useBodyEncodingForURI": true, 
+      "+socket.txBufSize": "64000", 
+      "+socket.rxBufSize": "64000", 
+      "+tcpNoDelay": "1", 
+      "+secure": false, 
+      "+scheme": "http"}' ${pkg}/conf/server.xml > ${cfg.homeDir}/conf/server.xml
+    '') else ''
+      ${pkgs.yq-go}/bin/yq -p xml -o xml '.Server.Service.Connector +=
+        {"+port": "${toString cfg.port}", "+address": "${cfg.listenAddress}"}' \
+        ${pkg}/conf/server.xml > ${cfg.homeDir}/conf/server.xml
+    ''}
+
 
   '';
 
@@ -79,50 +111,32 @@ in
 {
   options.services.teamcity = with types; {
 
-    enable = mkEnableOption name; # rdy
+    enable = mkEnableOption name;
 
-    user = mkOption { # rdy
+    user = mkOption {
       type = str;
       default = name;
       description = "User account under which ${name} runs.";
     };
 
-    group = mkOption { # rdy
+    group = mkOption {
       type = str;
       default = name;
       description = "Group account under which ${name} runs. Add user to this group to get access to Data Directory.";
     };
 
-    homeDir = mkOption { # rdy
+    homeDir = mkOption {
       type = str;
       default = "${name}";
       apply = (o: "/var/lib/" + o);
       description = "Agent's Home Directory will be created by systemd in /var/lib.";
     };
 
-    #homeConfigs = mkOption {
-    #  default = {
-    #  append = {};
-    #  override = {};
-    #  };
-    #  type = types.listOf types.path;
-    #  description = lib.mdDoc "Extra configuration files to pull into the tomcat conf directory";
-    #};
-
-    dataDir = mkOption { # rdy
+    dataDir = mkOption {
       type = str;
       default = "/${name}";
       description = "Path to TeamCity Data Directory.";
     };
-
-    #dataConfigs = mkOption {
-    #  default = {
-    #  append = {};
-    #  override = {};
-    #  };
-    #  type = types.listOf types.path;
-    #  description = lib.mdDoc "Extra configuration files to pull into the tomcat conf directory";
-    #};
 
     cleanUp = mkOption {
       type = either bool (listOf str);
@@ -136,16 +150,16 @@ in
     listenAddress = mkOption {
       type = str;
       default = "localhost";
-      description = "Address the server will listen on.";
+      description = "Address the tomcat/nginx will listen on.";
     };
 
     port = mkOption {
       type = port;
       default = 8111;
-      description = "Port the server will listen on.";
+      description = "Port the ${name} will listen on. This has no effect on the nginx proxy.";
     };
 
-    environment = mkOption { # rdy
+    environment = mkOption {
       type = attrsOf str;
       default = { };
       example = {
@@ -157,33 +171,14 @@ in
       description = "Defines environment variables.";
     };
 
-    jdk = mkOption { # rdy
+    jdk = mkOption {
       type = package;
       default = pkgs.jdk11_headless;
       description = "Which JDK to use.";
     };
 
-    # HOW TO
-
-    #virtualHost = mkOption {
-    #  # and HERE !!!!!!!!!
-    #  type = types.submodule (import ../web-servers/apache-httpd/vhost-options.nix);
-    #  example = literalExpression ''
-    #    {
-    #      hostName = "mediawiki.example.org";
-    #      adminAddr = "webmaster@example.org";
-    #      forceSSL = true;
-    #      enableACME = true;
-    #    }
-    #  '';
-    #  description = lib.mdDoc ''
-    #    Apache configuration can be done by adapting {option}`services.httpd.virtualHosts`.
-    #    See [](#opt-services.httpd.virtualHosts) for further information.
-    #  '';
-    #};
-
-    nginx.enable = mkEnableOption "proxy";
-    nginx.ssl.enable = mkEnableOption "ssl";
+    reverseProxy.enable = mkEnableOption "Nginx reverse proxy";
+    reverseProxy.enableACME = mkEnableOption "Nginx SSL";
 
   };
 
@@ -191,19 +186,25 @@ in
 
   config =
     let
-      nginx = mkIf cfg.nginx.enable {
 
-        # WIP
-        services.nginx = {
+      ssl = mkIf (cfg.reverseProxy.enableACME && cfg.reverseProxy.enable) {
+        services.nginx.virtualHosts.${cfg.listenAddress} = {
+          forceSSL = true;
+          enableACME = true;
+        };
+      };
+
+      proxy = {
+        services.nginx = mkIf cfg.reverseProxy.enable {
           enable = true;
-          clientMaxBodySize = "0";
-          virtualHosts."vm.local" = { # opt
+          virtualHosts.${cfg.listenAddress} = {
             extraConfig = ''
               proxy_read_timeout     1200;
               proxy_connect_timeout  240;
+              client_max_body_size   0;
             '';
             locations."/" = {
-              proxyPass = "http://localhost:8111"; # opt
+              proxyPass = "http://localhost:8111";
               proxyWebsockets = true;
               extraConfig = ''
                 proxy_set_header    Host $server_name:$server_port;
@@ -214,24 +215,9 @@ in
             };
           };
         };
-
       };
 
-      ssl = mkIf (cfg.nginx.ssl.enable && cfg.nginx.enable) {
 
-        # WIP
-        services.nginx.virtualHosts."vm.local" = { # opt
-          addSSL = true;
-          enableACME = true;
-        };
-        security.acme = {
-          acceptTerms = true;
-          defaults.email = "mail@mail.org"; # opt
-        };
-
-      };
-
-      # rdy
       main = {
 
         environment.systemPackages = [
@@ -288,9 +274,5 @@ in
       };
 
     in
-    mkIf cfg.enable (mkMerge [
-      main
-      nginx
-      ssl
-    ]);
+    mkIf cfg.enable (mkMerge [ main proxy ssl ]);
 }
